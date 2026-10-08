@@ -1,0 +1,599 @@
+<title>Отрыв поручня метро</title>
+<meta name="description" content="3D-модель: человек тормозит о вертикальный поручень в советском вагоне метро при торможении поезда. Расчёт нагрузок на крепления пол/потолок.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=PT+Sans+Narrow:wght@400;700&family=PT+Sans:wght@400;700&family=PT+Mono&display=swap">
+<style>
+/* Layout: одна рабочая станция — слева 3D-вид с приборной HUD и графиками, справа пульт параметров. Тёмная «кабина машиниста», одна тема. */
+:root{
+  --bg:#13171c;          /* корпус пульта */
+  --panel:#1b2128;       /* панели */
+  --line:#2c3540;        /* разделители */
+  --fg:#dfe5ea;          /* основной текст */
+  --muted:#8b98a5;       /* подписи */
+  --accent:#e8a33a;      /* сигнальная лампа / сила */
+  --blue:#5b8fd0;        /* кузов 81-717 */
+  --cyan:#5cc3c9;        /* скорость человека */
+  --ok:#5bbf6a; --warn:#e5c041; --bad:#e2574c;
+  --f-display:"PT Sans Narrow","Arial Narrow",Arial,sans-serif;
+  --f-body:"PT Sans","Segoe UI",Arial,sans-serif;
+  --f-mono:"PT Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font:14px/1.4 var(--f-body);margin:0}
+*{box-sizing:border-box}
+.app{display:grid;grid-template-columns:minmax(0,1fr) 360px;height:100%;min-height:560px}
+.stage{display:grid;grid-template-rows:minmax(0,1fr) auto;min-width:0;min-height:0;border-right:1px solid var(--line)}
+.view{position:relative;min-height:0;overflow:hidden;background:#0b0d10}
+#gl{display:block;width:100%;height:100%}
+.hud{position:absolute;left:12px;top:12px;display:grid;grid-template-columns:repeat(3,auto);gap:8px;pointer-events:none}
+.gauge{background:rgba(12,15,19,.82);border:1px solid var(--line);border-radius:4px;padding:6px 10px;min-width:118px}
+.gauge .k{font:700 11px/1 var(--f-display);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.gauge .v{font:700 26px/1.1 var(--f-mono);font-variant-numeric:tabular-nums;color:var(--fg)}
+.gauge .v small{font:400 12px var(--f-body);color:var(--muted);margin-left:3px}
+.gauge .s{font:12px/1.2 var(--f-mono);color:var(--muted);font-variant-numeric:tabular-nums}
+.gauge.train .v{color:var(--blue)} .gauge.person .v{color:var(--cyan)} .gauge.force .v{color:var(--accent)}
+.status{position:absolute;right:12px;top:12px;font:700 15px/1 var(--f-display);letter-spacing:.04em;text-transform:uppercase;padding:8px 12px;border-radius:3px;border:1px solid currentColor;background:rgba(12,15,19,.85)}
+.status.ok{color:var(--ok)} .status.warn{color:var(--warn)} .status.bad{color:var(--bad)}
+.transport{position:absolute;left:12px;right:12px;bottom:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.transport input[type=range]{flex:1;min-width:120px}
+.tclock{font:13px var(--f-mono);font-variant-numeric:tabular-nums;color:var(--fg);background:rgba(12,15,19,.82);padding:4px 8px;border-radius:3px;border:1px solid var(--line)}
+.cams{position:absolute;right:12px;top:52px;display:flex;flex-direction:column;gap:4px;align-items:flex-end}
+.charts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:var(--line);border-top:1px solid var(--line)}
+.chart{background:var(--panel);padding:8px 10px 6px;min-width:0}
+.chart h4{margin:0 0 4px;font:700 12px/1.2 var(--f-display);letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+.chart canvas{display:block;width:100%;height:120px}
+.legend{display:flex;flex-wrap:wrap;gap:4px 10px;font:11px var(--f-body);color:var(--muted);margin-top:3px}
+.legend i{display:inline-block;width:12px;height:3px;margin-right:4px;vertical-align:middle}
+.panel{overflow-y:auto;background:var(--panel);padding-inline:16px;padding-block:14px 24px;min-width:0}
+.panel h1{font:700 26px/1.05 var(--f-display);margin:0 0 4px;letter-spacing:.01em;text-wrap:balance}
+.panel .sub{color:var(--muted);font-size:12.5px;margin:0 0 12px}
+fieldset{border:0;border-top:1px solid var(--line);margin:0;padding:12px 0 6px;display:grid;gap:10px}
+legend{font:700 12px/1 var(--f-display);letter-spacing:.1em;text-transform:uppercase;color:var(--accent);padding:0 6px 0 0}
+.row{display:grid;grid-template-columns:1fr auto;gap:2px 8px;align-items:baseline}
+.row label{font-size:13px}
+.row output{font:13px var(--f-mono);font-variant-numeric:tabular-nums;color:var(--fg);text-align:right}
+.row input[type=range],.row select{grid-column:1/-1;width:100%}
+.row .hint{grid-column:1/-1;font-size:11.5px;color:var(--muted);margin-top:-2px}
+input[type=range]{accent-color:var(--accent);height:18px}
+select{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:3px;padding:5px 6px;font:13px var(--f-body)}
+button{font:700 12px/1 var(--f-display);letter-spacing:.06em;text-transform:uppercase;color:var(--fg);background:#262e37;border:1px solid #3a4652;border-radius:3px;padding:7px 10px;cursor:pointer}
+button:hover{background:#2f3944}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.on{border-color:var(--accent);color:var(--accent)}
+.presets{display:flex;flex-wrap:wrap;gap:6px}
+.check{display:flex;gap:8px;align-items:center;font-size:13px}
+.result{border:1px solid var(--line);border-radius:4px;padding:10px 12px;display:grid;gap:8px;background:var(--bg)}
+.verdict{font:700 16px/1.2 var(--f-display);letter-spacing:.02em}
+.verdict.ok{color:var(--ok)} .verdict.warn{color:var(--warn)} .verdict.bad{color:var(--bad)}
+.meter{display:grid;grid-template-columns:88px minmax(0,1fr) 58px;gap:8px;align-items:center;font-size:12.5px}
+.bar{position:relative;height:10px;background:#0c0f12;border:1px solid var(--line);border-radius:2px;overflow:hidden}
+.bar b{position:absolute;inset:0 auto 0 0;background:var(--ok)}
+.bar s{position:absolute;top:-1px;bottom:-1px;width:2px;background:var(--fg);text-decoration:none}
+.meter span:last-child{font:12px var(--f-mono);text-align:right;font-variant-numeric:tabular-nums}
+.kv{display:grid;grid-template-columns:1fr auto;gap:2px 10px;font-size:12.5px}
+.kv dd{margin:0;font:12.5px var(--f-mono);font-variant-numeric:tabular-nums;text-align:right}
+.kv dt{color:var(--muted)}
+details{border-top:1px solid var(--line);padding-top:10px;margin-top:12px;font-size:12.5px;color:var(--muted)}
+details summary{cursor:pointer;color:var(--fg);font:700 12px var(--f-display);letter-spacing:.08em;text-transform:uppercase}
+details code{font:12px var(--f-mono);color:var(--fg)}
+details p{margin:6px 0}
+@media (max-width:860px){
+  .app{grid-template-columns:1fr;height:auto}
+  .stage{border-right:0;grid-template-rows:62vh auto}
+  .charts{grid-template-columns:1fr}
+  .hud{grid-template-columns:repeat(2,auto)}
+  .gauge{min-width:0;padding:4px 8px}.gauge .v{font-size:19px}
+  .cams{top:auto;bottom:48px}
+}
+@media (prefers-reduced-motion:reduce){*{scroll-behavior:auto}}
+</style>
+
+<div class="app">
+  <div class="stage">
+    <div class="view" id="view">
+      <canvas id="gl" aria-label="3D-модель вагона метро с человеком у поручня"></canvas>
+      <div class="hud">
+        <div class="gauge train"><div class="k">Поезд</div><div class="v"><span id="hTrain">0</span><small>км/ч</small></div><div class="s" id="hTrainS">замедл. 0.00 м/с²</div></div>
+        <div class="gauge person"><div class="k">Человек (абс.)</div><div class="v"><span id="hPers">0</span><small>км/ч</small></div><div class="s" id="hPersS">отн. вагона 0.00 м/с</div></div>
+        <div class="gauge force"><div class="k">Сила на поручень</div><div class="v"><span id="hForce">0</span><small>Н</small></div><div class="s" id="hForceS">наклон 0°</div></div>
+      </div>
+      <div class="status ok" id="status">Держится</div>
+      <div class="cams">
+        <button type="button" data-cam="inside">Салон</button>
+        <button type="button" data-cam="close">Крупно</button>
+        <button type="button" data-cam="outside">Снаружи</button>
+        <button type="button" data-cam="top">Сверху</button>
+      </div>
+      <div class="transport">
+        <button type="button" id="play">Пауза</button>
+        <button type="button" id="restart">С начала</button>
+        <select id="rate" aria-label="Скорость воспроизведения">
+          <option value="0.1">×0.1</option><option value="0.25">×0.25</option><option value="0.5">×0.5</option><option value="1" selected>×1</option><option value="2">×2</option><option value="4">×4</option>
+        </select>
+        <input type="range" id="scrub" min="0" max="1000" value="0" aria-label="Время">
+        <span class="tclock" id="clock">0.00 с</span>
+      </div>
+    </div>
+    <div class="charts">
+      <div class="chart"><h4>Нагрузки, Н</h4><canvas id="c1"></canvas><div class="legend" id="l1"></div></div>
+      <div class="chart"><h4>Поезд</h4><canvas id="c2"></canvas><div class="legend" id="l2"></div></div>
+      <div class="chart"><h4>Человек относительно вагона</h4><canvas id="c3"></canvas><div class="legend" id="l3"></div></div>
+    </div>
+  </div>
+
+  <aside class="panel">
+    <h1>Отрыв поручня при торможении</h1>
+    <p class="sub">Вагон типа 81-717. Человек держится одной рукой за вертикальный поручень, закреплённый в полу и потолке. Любое изменение пересчитывает всю поездку.</p>
+
+    <div class="presets" role="group" aria-label="Сценарии">
+      <button type="button" data-preset="service">Служебное</button>
+      <button type="button" data-preset="emergency">Экстренное</button>
+      <button type="button" data-preset="worn">Изношенный крепёж</button>
+      <button type="button" data-preset="crowd">Толпа на поручне</button>
+    </div>
+
+    <fieldset><legend>Поезд</legend>
+      <div class="row"><label for="v0">Скорость перед торможением</label><output id="o_v0"></output><input type="range" id="v0" min="5" max="90" step="1"></div>
+      <div class="row"><label for="aMax">Замедление</label><output id="o_aMax"></output><input type="range" id="aMax" min="0.3" max="4" step="0.05"><div class="hint">Служебное ≈ 1.0–1.3 м/с², экстренное ≈ 1.6–2.0, удар/столкновение — выше</div></div>
+      <div class="row"><label for="tRamp">Нарастание торможения</label><output id="o_tRamp"></output><input type="range" id="tRamp" min="0.03" max="3" step="0.01"><div class="hint" id="jerk"></div></div>
+    </fieldset>
+
+    <fieldset><legend>Человек</legend>
+      <div class="row"><label for="h">Высота хвата</label><output id="o_h"></output><input type="range" id="h" min="0.4" max="2.05" step="0.01"></div>
+      <div class="row"><label for="dx">Стоит вдоль хода поезда</label><output id="o_dx"></output><input type="range" id="dx" min="-0.7" max="0.7" step="0.01"><div class="hint">«−» — позади поручня (по ходу его толкает на поручень), «+» — впереди (тянет за руку)</div></div>
+      <div class="row"><label for="dz">Сбоку от поручня</label><output id="o_dz"></output><input type="range" id="dz" min="-0.7" max="0.7" step="0.01"></div>
+      <div class="row"><label for="mass">Масса</label><output id="o_mass"></output><input type="range" id="mass" min="40" max="150" step="1"></div>
+      <div class="row"><label for="height">Рост</label><output id="o_height"></output><input type="range" id="height" min="1.5" max="2.0" step="0.01"></div>
+      <div class="row"><label for="stab">Устойчивость на ногах</label><output id="o_stab"></output><input type="range" id="stab" min="0" max="1.5" step="0.05"><div class="hint">Сколько крутящего момента держат стопы и голеностоп; 0 — человек «висит» на руке</div></div>
+      <div class="row"><label for="grip">Сила хвата (до срыва руки)</label><output id="o_grip"></output><input type="range" id="grip" min="150" max="1500" step="10"></div>
+      <div class="row"><label for="people">Людей на этом поручне</label><output id="o_people"></output><input type="range" id="people" min="1" max="8" step="1"><div class="hint">Все держатся так же; нагрузки на поручень складываются</div></div>
+    </fieldset>
+
+    <fieldset><legend>Поручень и крепления</legend>
+      <div class="row"><label for="mount">Тип заделки концов</label><output></output>
+        <select id="mount"><option value="fixed">Жёсткая (фланец на болтах)</option><option value="pinned">Шарнирная (труба в гнезде)</option></select></div>
+      <div class="row"><label for="capC">Прочность крепления к потолку</label><output id="o_capC"></output><input type="range" id="capC" min="100" max="12000" step="50"></div>
+      <div class="row"><label for="capF">Прочность крепления к полу</label><output id="o_capF"></output><input type="range" id="capF" min="100" max="12000" step="50"><div class="hint">Предельное усилие вырыва крепежа. Для фланца момент переводится в усилие на болты с плечом 6 см</div></div>
+    </fieldset>
+
+    <fieldset><legend>Итог поездки</legend>
+      <div class="result">
+        <div class="verdict" id="verdict"></div>
+        <div class="meter"><span>Потолок</span><div class="bar"><b id="bC"></b><s id="pC"></s></div><span id="uC"></span></div>
+        <div class="meter"><span>Пол</span><div class="bar"><b id="bF"></b><s id="pF"></s></div><span id="uF"></span></div>
+        <dl class="kv" id="peaks"></dl>
+      </div>
+      <label class="check"><input type="checkbox" id="cut" checked> Разрез: убрать ближний борт</label>
+    </fieldset>
+
+    <details>
+      <summary>Как считается</summary>
+      <p>Тело — жёсткий «перевёрнутый маятник», вращающийся вокруг стоп. На центр масс (0.55 роста) в системе вагона действует сила инерции <code>m·a(t)</code>, гравитация и момент голеностопа (упругий, с пределом опрокидывания через носок ≈ 13 см).</p>
+      <p>Рука — пружина с демпфером между плечом (0.82 роста) и точкой хвата. Её усилие <code>T</code> находится из динамики, поэтому резкое нарастание торможения даёт рывок больше статической нагрузки.</p>
+      <p>Поручень — балка длиной L с горизонтальной силой F на высоте a (b = L − a).<br>
+      Шарнирные концы: <code>R<sub>пол</sub> = F·b/L</code>, <code>R<sub>пот</sub> = F·a/L</code>.<br>
+      Жёсткие концы: <code>R<sub>пол</sub> = F·b²(3a+b)/L³</code>, <code>M<sub>пол</sub> = F·a·b²/L²</code>, для потолка — симметрично. Нагрузка на крепёж <code>Q = R + M/0.06 м</code>.</p>
+      <p>Если Q превышает прочность крепления, оно отрывается и поручень проворачивается вокруг уцелевшего конца. Если T больше силы хвата — рука соскальзывает. Шаг вперёд (рефлекс) не моделируется; при остановке замедление снимается мгновенно, отсюда обратный толчок.</p>
+    </details>
+  </aside>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+"use strict";
+/* ===================== Параметры ===================== */
+const L_POLE = 2.15;   // пол–потолок салона, м
+const E_FLANGE = 0.06; // плечо фланца для перевода момента в усилие на болты, м
+const P = {v0:60,aMax:1.8,tRamp:0.4,h:1.15,dx:-0.32,dz:0.22,mass:75,height:1.75,stab:1,grip:500,people:1,mount:"fixed",capC:4000,capF:6000};
+const PRESETS = {
+  service:  {v0:60,aMax:1.1,tRamp:1.0,people:1,capC:4000,capF:6000,stab:1},
+  emergency:{v0:60,aMax:1.8,tRamp:0.4,people:1,capC:4000,capF:6000,stab:1},
+  worn:     {v0:70,aMax:1.9,tRamp:0.25,people:1,capC:450,capF:6000,stab:0.6},
+  crowd:    {v0:70,aMax:1.8,tRamp:0.3,people:6,capC:2500,capF:6000,stab:0.5},
+};
+const FMT = {
+  v0:v=>v.toFixed(0)+" км/ч", aMax:v=>v.toFixed(2)+" м/с²", tRamp:v=>v.toFixed(2)+" с",
+  h:v=>{const d=Math.round((v-L_POLE/2)*100);return v.toFixed(2)+" м · "+(d===0?"середина":(d>0?"+":"−")+Math.abs(d)+" см от середины")},
+  dx:v=>(v>=0?"+":"−")+Math.abs(v).toFixed(2)+" м", dz:v=>(v>=0?"+":"−")+Math.abs(v).toFixed(2)+" м",
+  mass:v=>v.toFixed(0)+" кг", height:v=>v.toFixed(2)+" м", stab:v=>Math.round(v*100)+" %",
+  grip:v=>v.toFixed(0)+" Н", people:v=>v.toFixed(0), capC:v=>v.toFixed(0)+" Н", capF:v=>v.toFixed(0)+" Н",
+};
+
+/* ===================== Физика ===================== */
+function geometry(p){
+  const sc=p.height/1.75, H=p.height;
+  let fx=-p.dx, fz=-p.dz; const fl=Math.hypot(fx,fz);
+  if(fl<0.12){fx=1;fz=0}else{fx/=fl;fz/=fl}
+  const rx=-fz, rz=fx, sw=0.19*sc;      // правое плечо (держащая рука)
+  return {sc,hs:0.82*H,hc:0.55*H,fx,fz,ox:rx*sw,oz:rz*sw,psi:Math.atan2(-fz,fx),reach:0.78*sc};
+}
+function shoulderAt(p,G,th){
+  const c=Math.cos(th),s=Math.sin(th);
+  return [p.dx+G.ox*c+G.hs*s, -G.ox*s+G.hs*c, p.dz+G.oz];
+}
+function mountLoads(F,h,mount){
+  const L=L_POLE,a=h,b=L-a;
+  let Rf,Rc,Mf=0,Mc=0;
+  if(mount==="pinned"){Rf=F*b/L;Rc=F*a/L}
+  else{Rf=F*b*b*(3*a+b)/(L*L*L);Rc=F*a*a*(a+3*b)/(L*L*L);Mf=F*a*b*b/(L*L);Mc=F*a*a*b/(L*L)}
+  return {Rf,Rc,Mf,Mc,Qf:Rf+Mf/E_FLANGE,Qc:Rc+Mc/E_FLANGE};
+}
+function simulate(p){
+  const g=9.81,m=p.mass,G=geometry(p),n=p.people;
+  const I=1.12*m*G.hc*G.hc;
+  const Ka=p.stab*1.5*m*g*G.hc, Ca=0.8*Math.sqrt(Math.max(Ka,1)*I);
+  const tauFwd=p.stab*m*g*0.13, tauBack=p.stab*m*g*0.07;
+  const kT=12000,kC=8000,cA=500;
+  const S0=shoulderAt(p,G,0), l0=Math.hypot(-S0[0],p.h-S0[1],-S0[2]);
+  const t0=1.0, v0=p.v0/3.6;
+  let t=0,v=v0,s=0,th=0,om=0,a=0,st=l0>G.reach?1:0,fallen=false,stopT=null,eventT=null,uB=[0,0,0];
+  const dt=0.0005,frames=[];let nextRec=0;
+  const pk={Fh:0,Qc:0,Qf:0,uC:0,uF:0,th:0,vrel:0,T:0,fr:0};
+  let tEnd=120;
+  while(t<=tEnd){
+    a=(t<t0||v<=0)?0:p.aMax*Math.min(1,(t-t0)/p.tRamp);
+    const c=Math.cos(th),sn=Math.sin(th);
+    const Sx=p.dx+G.ox*c+G.hs*sn, Sy=-G.ox*sn+G.hs*c, Sz=p.dz+G.oz;
+    const dSx=-G.ox*sn+G.hs*c, dSy=-G.ox*c-G.hs*sn;
+    const dCx=G.hc*c, dCy=-G.hc*sn;
+    let tau=m*a*dCx - m*g*dCy;
+    let ta=-Ka*th-Ca*om; ta=Math.max(-tauFwd,Math.min(tauBack,ta));
+    if(fallen) ta=0;
+    tau+=ta;
+    let T=0,ux=0,uy=0,uz=0;
+    if(st===0){
+      const dx=-Sx,dy=p.h-Sy,dz=-Sz,l=Math.hypot(dx,dy,dz);
+      ux=dx/l;uy=dy/l;uz=dz/l;
+      const ldot=-(ux*dSx+uy*dSy)*om, ext=l-l0;
+      T=(ext>0?kT:kC)*ext+cA*ldot;
+      if(T>p.grip){st=2;eventT=t;T=0}
+    }
+    tau+=T*(ux*dSx+uy*dSy);
+    const Fpx=-T*ux*n,Fpz=-T*uz*n,Fh=Math.hypot(Fpx,Fpz);
+    const ml=mountLoads(Fh,p.h,p.mount);
+    if(st===0){
+      const rc=ml.Qc/p.capC, rf=ml.Qf/p.capF;
+      if(rc>1||rf>1){st=rc>=rf?3:4;eventT=t;uB=[ux,uy,uz]}
+    }
+    const alpha=tau/I;
+    const fr=Math.abs(m*(dCx*alpha-G.hc*sn*om*om)-m*a-T*ux)/(0.45*m*g);
+    const vrel=dCx*om;
+    if(t>=nextRec){
+      frames.push({t,v,a,s,th,T,Fpx,Fpz,Fh,Qc:ml.Qc,Qf:ml.Qf,st,vrel,fr,fallen});
+      nextRec+=1/60;
+      pk.Fh=Math.max(pk.Fh,Fh);pk.Qc=Math.max(pk.Qc,ml.Qc);pk.Qf=Math.max(pk.Qf,ml.Qf);
+      pk.th=Math.max(pk.th,Math.abs(th));pk.vrel=Math.max(pk.vrel,Math.abs(vrel));pk.T=Math.max(pk.T,Math.abs(T));if(!fallen)pk.fr=Math.max(pk.fr,fr);
+    }
+    om+=alpha*dt; th+=om*dt;
+    if(!fallen&&Math.abs(th)>0.6&&st!==0) fallen=true;
+    if(th>1.42){th=1.42;om=0;fallen=true} if(th<-1.42){th=-1.42;om=0;fallen=true}
+    if(t>t0&&v>0){v-=a*dt;if(v<=0){v=0;stopT=t;tEnd=Math.min(tEnd,t+4)}}
+    s+=v*dt; t+=dt;
+    if(p.v0<=0&&t>5) break;
+  }
+  pk.uC=pk.Qc/p.capC;pk.uF=pk.Qf/p.capF;
+  return {frames,pk,G,l0,uB,stopT,eventT,tEnd:frames[frames.length-1].t,t0};
+}
+
+/* ===================== 3D сцена ===================== */
+const canvas=document.getElementById("gl"), viewEl=document.getElementById("view");
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.outputEncoding=THREE.sRGBEncoding;
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x07090b);
+scene.fog=new THREE.Fog(0x07090b,18,70);
+const camera=new THREE.PerspectiveCamera(50,1,0.05,200);
+const controls=new THREE.OrbitControls(camera,canvas);
+controls.enableDamping=true;controls.target.set(0,1.1,0);
+scene.add(new THREE.HemisphereLight(0xfff4dd,0x30302a,0.55));
+scene.add(new THREE.AmbientLight(0xffffff,0.25));
+const sun=new THREE.DirectionalLight(0xffffff,0.45);sun.position.set(4,8,6);scene.add(sun);
+
+const M=(c,o={})=>new THREE.MeshStandardMaterial(Object.assign({color:c,roughness:0.75,metalness:0},o));
+const mat={
+  body:M(0x4f86c6,{roughness:0.5}), stripe:M(0xe9e3cf), roof:M(0x8e959b), under:M(0x24272b),
+  wallIn:M(0xd9d3b8), ceil:M(0xece8da), floor:M(0x5b3b31), door:M(0x9aa4ad,{roughness:0.5}),
+  glass:new THREE.MeshStandardMaterial({color:0x9fc1d6,transparent:true,opacity:0.18,roughness:0.1,metalness:0.2,depthWrite:false}),
+  glassDark:M(0x1c2a33,{roughness:0.2}), seat:M(0x8a5636,{roughness:0.55}), seatBase:M(0x5c4a3e),
+  chrome:M(0xd3d8dc,{roughness:0.25,metalness:0.35}), lamp:new THREE.MeshBasicMaterial({color:0xfffbe8}),
+  head:new THREE.MeshBasicMaterial({color:0xfff6d0}), tail:new THREE.MeshBasicMaterial({color:0xff3b2e}),
+  tunnel:M(0x3b3d3f,{roughness:0.95}), ring:M(0x2a2c2e), rail:M(0x8d8f91,{metalness:0.5,roughness:0.4}),
+  sleeper:M(0x3a3029), bed:M(0x1e1d1b), tlamp:new THREE.MeshBasicMaterial({color:0xffe2a0}), cable:M(0x111111),
+};
+function box(w,h,d,m,x,y,z,parent){const o=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);o.position.set(x,y,z);parent.add(o);return o}
+function cylBetween(a,b,r,m,parent){
+  const o=new THREE.Mesh(new THREE.CylinderGeometry(r,r,1,12),m);parent&&parent.add(o);setCyl(o,a,b);return o}
+const _up=new THREE.Vector3(0,1,0),_d=new THREE.Vector3();
+function setCyl(o,a,b){_d.set(b[0]-a[0],b[1]-a[1],b[2]-a[2]);const l=_d.length()||1e-6;
+  o.position.set((a[0]+b[0])/2,(a[1]+b[1])/2,(a[2]+b[2])/2);o.scale.set(1,l,1);o.quaternion.setFromUnitVectors(_up,_d.divideScalar(l))}
+
+/* ---- вагон 81-717 (локально: центр в x=0; поручень симуляции — у двери x=2.4) ---- */
+const HL=9.6,HW=1.35,CEIL=L_POLE,WIN0=0.95,WIN1=1.8,DOORH=1.95,DOORS=[-7.1,-2.4,2.4,7.1],DW=0.64;
+const car=new THREE.Group();car.position.x=-2.4;scene.add(car);
+const nearWall=new THREE.Group();car.add(nearWall);
+const segs=[];{let a=-HL;for(const d of DOORS){segs.push([a,d-DW]);a=d+DW}segs.push([a,HL])}
+function buildSide(s){
+  const parent=s>0?nearWall:car;
+  const feats=[];
+  for(const d of DOORS) feats.push({a:d-DW,b:d+DW,type:"door"});
+  for(const [a,b] of segs){
+    const ua=a+0.28,ub=b-0.28,len=ub-ua,cnt=len>2.6?2:1,gap=0.3,w=(len-(cnt-1)*gap)/cnt;
+    let x=ua;for(let i=0;i<cnt;i++){feats.push({a:x,b:x+w,type:"win"});x+=w+gap}
+  }
+  feats.sort((p,q)=>p.a-q.a);
+  const all=[];let x=-HL;
+  for(const f of feats){if(f.a>x+1e-6)all.push({a:x,b:f.a,type:"solid"});all.push(f);x=f.b}
+  if(x<HL)all.push({a:x,b:HL,type:"solid"});
+  for(const [zz,m,isOut] of [[s*(HW+0.02),mat.body,true],[s*(HW-0.03),mat.wallIn,false]]){
+    const th=0.04,y0=isOut?-0.35:0;
+    for(const f of all){
+      const w=f.b-f.a,cx=(f.a+f.b)/2;
+      if(f.type==="solid") box(w,CEIL-y0,th,m,cx,(CEIL+y0)/2,zz,parent);
+      else if(f.type==="win"){box(w,WIN0-y0,th,m,cx,(WIN0+y0)/2,zz,parent);box(w,CEIL-WIN1,th,m,cx,(CEIL+WIN1)/2,zz,parent)}
+      else {box(w,CEIL-DOORH,th,m,cx,(CEIL+DOORH)/2,zz,parent); if(isOut) box(w,0.35,th,m,cx,-0.175,zz,parent)}
+    }
+    if(isOut) for(const f of all) if(f.type!=="door") box(f.b-f.a,0.07,0.01,mat.stripe,(f.a+f.b)/2,0.8,zz+s*0.025,parent);
+  }
+  for(const f of all){
+    const w=f.b-f.a,cx=(f.a+f.b)/2;
+    if(f.type==="win") box(w,WIN1-WIN0,0.01,mat.glass,cx,(WIN0+WIN1)/2,s*HW,parent);
+    if(f.type==="door") for(const k of [-1,1]){
+      const lx=cx+k*w/4,lw=w/2-0.01,z=s*HW;
+      box(lw,1.0,0.05,mat.door,lx,0.5,z,parent);box(lw,DOORH-1.75,0.05,mat.door,lx,(DOORH+1.75)/2,z,parent);
+      box(0.08,0.75,0.05,mat.door,lx-lw/2+0.04,1.375,z,parent);box(0.08,0.75,0.05,mat.door,lx+lw/2-0.04,1.375,z,parent);
+      box(lw-0.16,0.75,0.01,mat.glass,lx,1.375,z,parent);
+    }
+  }
+  // сиденья вдоль бортов + вертикальные поручни у концов диванов
+  for(const [a,b] of segs){
+    const ua=a+0.12,ub=b-0.12,w=ub-ua,cx=(ua+ub)/2,zs=s*(HW-0.3);
+    box(w,0.38,0.42,mat.seatBase,cx,0.19,zs+s*0.02,parent);
+    box(w,0.1,0.5,mat.seat,cx,0.44,zs,parent);
+    const back=box(w,0.48,0.08,mat.seat,cx,0.76,s*(HW-0.08),parent);back.rotation.x=-s*0.12;
+    for(const px of [a+0.14,b-0.14]) if(Math.abs(px)<HL-0.3) cylBetween([px,0.5,s*(HW-0.55)],[px,1.92,s*(HW-0.55)],0.017,mat.chrome,parent);
+  }
+  cylBetween([-HL+0.4,1.92,s*(HW-0.55)],[HL-0.4,1.92,s*(HW-0.55)],0.016,mat.chrome,parent);
+}
+buildSide(-1);buildSide(1);
+box(2*HL,0.1,2*HW,mat.floor,0,-0.05,0,car);
+box(2*HL,0.02,2*HW-0.1,mat.ceil,0,CEIL+0.01,0,car);
+for(let x=-HL+0.8;x<HL-0.8;x+=1.6) for(const z of [-0.55,0.55]) box(1.3,0.02,0.12,mat.lamp,x,CEIL-0.01,z,car);
+// крыша — дуга, выдавленная вдоль вагона
+{const R=2.66,cy=CEIL+0.38-R,pts=[],N=24,a1=Math.atan2(CEIL-cy,HW+0.04),a2=Math.PI-a1;
+ for(let i=0;i<=N;i++){const a=a1+(a2-a1)*i/N;pts.push(new THREE.Vector2(Math.cos(a)*R,cy+Math.sin(a)*R))}
+ for(let i=N;i>=0;i--){const a=a1+(a2-a1)*i/N;pts.push(new THREE.Vector2(Math.cos(a)*(R-0.06),cy+Math.sin(a)*(R-0.06)))}
+ const g=new THREE.ExtrudeGeometry(new THREE.Shape(pts),{depth:2*HL,bevelEnabled:false});
+ const roof=new THREE.Mesh(g,mat.roof);roof.rotation.y=-Math.PI/2;roof.position.x=HL;car.add(roof);}
+// торцы
+for(const e of [1,-1]){
+  const x=e*(HL+0.03);
+  box(0.06,0.95,2*HW+0.08,mat.body,x,0.3,0,car);
+  box(0.06,CEIL-1.75,2*HW+0.08,mat.body,x,(CEIL+1.75)/2,0,car);
+  if(e>0){ // кабина: два лобовых окна, фары
+    box(0.06,0.8,0.42,mat.body,x,1.35,0,car);
+    for(const k of [-1,1]){box(0.06,0.8,0.18,mat.body,x,1.35,k*(HW-0.05),car);box(0.05,0.8,0.82,mat.glassDark,x+0.01,1.35,k*0.66,car);}
+    for(const k of [-1,1]){
+      for(const dz of [0,0.2]){const hl=new THREE.Mesh(new THREE.CylinderGeometry(0.07,0.07,0.05,20),mat.head);hl.rotation.z=Math.PI/2;hl.position.set(x+0.04,0.32,k*(0.55+dz));car.add(hl)}
+      const tl=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,0.05,16),mat.tail);tl.rotation.z=Math.PI/2;tl.position.set(x+0.04,0.12,k*1.05);car.add(tl);
+    }
+    box(0.04,0.18,0.5,mat.glassDark,x+0.02,1.88,0,car);
+  } else {
+    for(const k of [-1,1]) box(0.06,0.8,HW-0.4,mat.body,x,1.35,k*(HW+0.04+0.4)/2+k*0.0,car);
+    box(0.05,0.8,0.8,mat.glassDark,x-0.01,1.35,0,car);
+    box(0.08,0.2,0.18,mat.under,x-0.05,-0.25,0,car);
+  }
+}
+box(2*HL-0.6,0.75,2*HW-0.3,mat.under,0,-0.5,0,car);
+for(const bx of [-6.6,6.6]){
+  box(2.6,0.25,2.0,mat.under,bx,-0.78,0,car);
+  for(const wx of [-1.05,1.05]) for(const k of [-1,1]){const w=new THREE.Mesh(new THREE.CylinderGeometry(0.39,0.39,0.12,24),mat.under);w.rotation.x=Math.PI/2;w.position.set(bx+wx,-0.71,k*0.76);car.add(w)}
+}
+for(const lx of [-4,0,4]){const pl=new THREE.PointLight(0xfff3d8,0.55,7,1.5);pl.position.set(lx+2.4,1.9,0);scene.add(pl)}
+
+/* ---- тоннель (движется навстречу вагону) ---- */
+const world=new THREE.Group();scene.add(world);
+const PERIOD=6,TX=60,TY=0.7,TR=3.4;
+{const tg=new THREE.CylinderGeometry(TR,TR,2*TX+PERIOD*2,32,1,true);const t=new THREE.Mesh(tg,new THREE.MeshStandardMaterial({color:0x3b3d3f,roughness:0.95,side:THREE.BackSide}));
+ t.rotation.z=Math.PI/2;t.position.y=TY;world.add(t);}
+box(2*TX+PERIOD*2,0.05,4.6,mat.bed,0,-1.3,0,world);
+for(let x=-TX;x<=TX;x+=1.5){const r=new THREE.Mesh(new THREE.TorusGeometry(TR-0.02,0.06,6,32),mat.ring);r.rotation.y=Math.PI/2;r.position.set(x,TY,0);world.add(r)}
+{const sl=new THREE.InstancedMesh(new THREE.BoxGeometry(0.22,0.12,2.6),mat.sleeper,Math.floor(2*TX/0.75)+1);const dm=new THREE.Object3D();let i=0;
+ for(let x=-TX;x<=TX;x+=0.75){dm.position.set(x,-1.24,0);dm.updateMatrix();sl.setMatrixAt(i++,dm.matrix)}sl.count=i;world.add(sl);}
+for(const z of [-0.76,0.76]) box(2*TX+PERIOD*2,0.15,0.07,mat.rail,0,-1.16,z,world);
+for(let x=-TX;x<=TX;x+=PERIOD) for(const z of [-1,1]) box(0.5,0.12,0.08,mat.tlamp,x,1.5,z*(TR-0.15),world);
+for(const y of [0.9,1.05,1.2]) for(const z of [-1,1]) box(2*TX+PERIOD*2,0.04,0.04,mat.cable,0,y,z*(TR-0.25),world);
+
+/* ---- поручень симуляции ---- */
+const poleGroup=new THREE.Group();scene.add(poleGroup);
+const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.019,0.019,L_POLE,16),mat.chrome);poleGroup.add(pole);
+const flangeMatC=M(0x5bbf6a,{roughness:0.4}),flangeMatF=M(0x5bbf6a,{roughness:0.4});
+const flC=new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.06,0.03,20),flangeMatC);flC.position.set(0,L_POLE-0.015,0);scene.add(flC);
+const flF=new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.06,0.03,20),flangeMatF);flF.position.set(0,0.015,0);scene.add(flF);
+const forceArrow=new THREE.ArrowHelper(new THREE.Vector3(1,0,0),new THREE.Vector3(),1,0xe8a33a,0.12,0.07);scene.add(forceArrow);
+const velArrow=new THREE.ArrowHelper(new THREE.Vector3(1,0,0),new THREE.Vector3(),1,0x5cc3c9,0.1,0.06);scene.add(velArrow);
+const handMark=new THREE.Mesh(new THREE.TorusGeometry(0.03,0.006,6,20),new THREE.MeshBasicMaterial({color:0xe8a33a}));handMark.rotation.x=Math.PI/2;scene.add(handMark);
+
+/* ---- человек ---- */
+const personTilt=new THREE.Group();scene.add(personTilt);
+const personYaw=new THREE.Group();personTilt.add(personYaw);
+const body=new THREE.Group();personYaw.add(body);
+{const coat=M(0x3d4a57),jeans=M(0x2f4a6b),skin=M(0xe0b394),hat=M(0x4a3426),shoe=M(0x1b1b1b);
+ for(const z of [-0.1,0.1]){cylBetween([0,0.06,z],[0,0.88,z],0.065,jeans,body);box(0.26,0.08,0.11,shoe,0.05,0.04,z,body)}
+ box(0.24,0.6,0.4,coat,0,1.15,0,body);
+ cylBetween([0,1.45,0],[0,1.52,0],0.05,skin,body);
+ const hd=new THREE.Mesh(new THREE.SphereGeometry(0.11,20,14),skin);hd.position.set(0,1.62,0);body.add(hd);
+ const ht=new THREE.Mesh(new THREE.CylinderGeometry(0.125,0.12,0.11,18),hat);ht.position.set(-0.01,1.71,0);body.add(ht);
+ cylBetween([0,1.42,-0.21],[0.04,1.12,-0.24],0.045,coat,body);cylBetween([0.04,1.12,-0.24],[0.08,0.84,-0.23],0.04,coat,body);
+ const fh=new THREE.Mesh(new THREE.SphereGeometry(0.045,10,8),skin);fh.position.set(0.08,0.8,-0.23);body.add(fh);
+}
+const armCoat=M(0x3d4a57),skinM=M(0xe0b394);
+const upperArm=cylBetween([0,0,0],[0,1,0],0.046,armCoat,scene),foreArm=cylBetween([0,0,0],[0,1,0],0.041,armCoat,scene);
+const hand=new THREE.Mesh(new THREE.SphereGeometry(0.047,12,10),skinM);scene.add(hand);
+
+/* ===================== Состояние / UI ===================== */
+let sim=null,tPlay=0,playing=true,rate=1;
+const $=id=>document.getElementById(id);
+const ids=["v0","aMax","tRamp","h","dx","dz","mass","height","stab","grip","people","capC","capF"];
+function syncInputs(){for(const k of ids){$(k).value=P[k];$("o_"+k).textContent=FMT[k](P[k])}$("mount").value=P.mount;
+  $("jerk").textContent="Рывок ≈ "+(P.aMax/P.tRamp).toFixed(1)+" м/с³ (комфорт пассажира — до ~1)";}
+function recompute(){
+  P.h=Math.min(P.h,L_POLE-0.08);
+  sim=simulate(P);
+  tPlay=Math.min(tPlay,sim.tEnd);
+  $("scrub").max=String(Math.round(sim.tEnd*100));
+  const G=sim.G;personYaw.rotation.y=G.psi;body.scale.setScalar(G.sc);personTilt.position.set(P.dx,0,P.dz);
+  handMark.position.set(0,P.h,0);
+  summary();drawCharts();
+}
+for(const k of ids) $(k).addEventListener("input",e=>{P[k]=parseFloat(e.target.value);$("o_"+k).textContent=FMT[k](P[k]);if(k==="aMax"||k==="tRamp")syncInputs();recompute()});
+$("mount").addEventListener("change",e=>{P.mount=e.target.value;recompute()});
+document.querySelectorAll("[data-preset]").forEach(b=>b.addEventListener("click",()=>{
+  Object.assign(P,PRESETS[b.dataset.preset]);syncInputs();tPlay=0;playing=true;$("play").textContent="Пауза";recompute();
+  document.querySelectorAll("[data-preset]").forEach(x=>x.classList.toggle("on",x===b));}));
+$("play").addEventListener("click",()=>{if(!playing&&tPlay>=sim.tEnd)tPlay=0;playing=!playing;$("play").textContent=playing?"Пауза":"Пуск"});
+$("restart").addEventListener("click",()=>{tPlay=0;playing=true;$("play").textContent="Пауза"});
+$("rate").addEventListener("change",e=>rate=parseFloat(e.target.value));
+$("scrub").addEventListener("input",e=>{tPlay=parseFloat(e.target.value)/100;playing=false;$("play").textContent="Пуск"});
+$("cut").addEventListener("change",e=>nearWall.visible=!e.target.checked);
+nearWall.visible=false;
+
+const CAMS={inside:[[2.5,1.7,2.6],[0,1.05,0]],close:[[1.3,1.5,1.5],[0,1.1,0]],outside:[[-1,1.6,13],[0,0.8,0]],top:[[0.01,6.5,0.8],[0,0.6,0]]};
+function setCam(k){const [p,t]=CAMS[k];camera.position.set(...p);controls.target.set(...t);controls.update();
+  if(k==="outside"){$("cut").checked=false;nearWall.visible=true}else if(k!=="top"){$("cut").checked=true;nearWall.visible=false}}
+document.querySelectorAll("[data-cam]").forEach(b=>b.addEventListener("click",()=>setCam(b.dataset.cam)));
+
+const STATUS=[["Держится","ok"],["Не дотягивается до поручня","warn"],["Рука сорвалась","warn"],["Сорвано крепление к потолку","bad"],["Сорвано крепление к полу","bad"]];
+function utilColor(u){return u<0.6?0x5bbf6a:u<1?0xe5c041:0xe2574c}
+function cssUtil(u){return u<0.6?"var(--ok)":u<1?"var(--warn)":"var(--bad)"}
+function summary(){
+  const k=sim.pk,last=sim.frames[sim.frames.length-1];
+  let txt,cls;
+  if(last.st===3){txt=`Отрыв от потолка на ${sim.eventT.toFixed(2)} с`;cls="bad"}
+  else if(last.st===4){txt=`Отрыв от пола на ${sim.eventT.toFixed(2)} с`;cls="bad"}
+  else if(last.st===2){txt=`Рука сорвалась на ${sim.eventT.toFixed(2)} с — поручень цел`;cls="warn"}
+  else if(last.st===1){txt="Человек не дотягивается до поручня";cls="warn"}
+  else {const u=Math.max(k.uC,k.uF);txt=u<0.6?`Крепления держат, запас ×${(1/u).toFixed(1)}`:`Крепления держат на пределе (${Math.round(u*100)} %)`;cls=u<0.6?"ok":"warn"}
+  if(last.fallen) txt+=" · человек упал";
+  $("verdict").textContent=txt;$("verdict").className="verdict "+cls;
+  $("pC").style.left=Math.min(100,k.uC*100)+"%";$("pF").style.left=Math.min(100,k.uF*100)+"%";
+  $("peaks").innerHTML=[
+    ["Пик силы руки (на 1 чел.)",k.T.toFixed(0)+" Н"],
+    ["Пик гориз. силы на поручень",k.Fh.toFixed(0)+" Н"],
+    ["Пик нагрузки потолок / пол",k.Qc.toFixed(0)+" / "+k.Qf.toFixed(0)+" Н"],
+    ["Статика: m·a",(P.mass*P.aMax).toFixed(0)+" Н"],
+    ["Макс. наклон тела",(k.th*180/Math.PI).toFixed(1)+"°"],
+    ["Макс. скорость отн. вагона",k.vrel.toFixed(2)+" м/с"],
+    ["Сцепление подошв (μ≈0.45)",Math.round(k.fr*100)+" %"+(k.fr>1?" — проскальзывание":"")],
+    ["Остановка поезда",sim.stopT?sim.stopT.toFixed(1)+" с":"—"],
+  ].map(([a,b])=>`<dt>${a}</dt><dd>${b}</dd>`).join("");
+}
+
+/* ---- графики ---- */
+const CC={ink:"#8b98a5",grid:"#2a333d",fg:"#dfe5ea"};
+const SER1=[["Fh","Сила на поручень","#e8a33a"],["Qc","Крепление потолка","#e2574c"],["Qf","Крепление пола","#b58cf0"]];
+const SER2=[["vk","Скорость, км/ч","#5b8fd0",1],["a10","Замедление ×10, м/с²","#dfe5ea",1]];
+const SER3=[["vrel100","Скорость, см/с","#5cc3c9"],["thd","Наклон, °","#e8a33a"]];
+function legend(id,ser,extra=""){$(id).innerHTML=ser.map(s=>`<span><i style="background:${s[2]}"></i>${s[1]}</span>`).join("")+extra}
+legend("l1",SER1,`<span><i style="background:repeating-linear-gradient(90deg,#8b98a5 0 3px,transparent 3px 6px)"></i>Пределы креплений</span>`);legend("l2",SER2);legend("l3",SER3);
+function val(f,k){switch(k){case"vk":return f.v*3.6;case"a10":return f.a*10;case"vrel100":return f.vrel*100;case"thd":return f.th*180/Math.PI;default:return f[k]}}
+function drawChart(cv,ser,cursor,limits){
+  const r=cv.getBoundingClientRect(),dpr=Math.min(devicePixelRatio,2);
+  if(cv.width!==Math.round(r.width*dpr)||cv.height!==Math.round(r.height*dpr)){cv.width=Math.round(r.width*dpr);cv.height=Math.round(r.height*dpr)}
+  const c=cv.getContext("2d");c.setTransform(dpr,0,0,dpr,0,0);c.clearRect(0,0,r.width,r.height);
+  const fr=sim.frames,T=sim.tEnd,pl=38,pr=6,pt=6,pb=16,W=r.width-pl-pr,H=r.height-pt-pb;
+  let lo=0,hi=1;for(const s of ser)for(const f of fr){const v=val(f,s[0]);if(v>hi)hi=v;if(v<lo)lo=v}
+  let lim=[];if(limits){const top=hi;lim=limits.filter(l=>l[0]<=Math.max(top*3,1));for(const l of lim)hi=Math.max(hi,l[0])}
+  hi*=1.08;if(lo<0)lo*=1.08;
+  const X=t=>pl+t/T*W,Y=v=>pt+(hi-v)/(hi-lo)*H;
+  c.font="10px PT Mono, monospace";c.fillStyle=CC.ink;c.strokeStyle=CC.grid;c.lineWidth=1;
+  const step=nice((hi-lo)/4);
+  for(let v=Math.ceil(lo/step)*step;v<=hi;v+=step){const y=Math.round(Y(v))+.5;c.beginPath();c.moveTo(pl,y);c.lineTo(pl+W,y);c.stroke();c.textAlign="right";c.fillText(fmtN(v),pl-4,y+3)}
+  const ts=nice(T/6);c.textAlign="center";for(let t=0;t<=T+1e-6;t+=ts)c.fillText(t.toFixed(ts<1?1:0)+"с",X(t),r.height-3);
+  for(const l of lim){c.setLineDash([4,3]);c.strokeStyle=l[1];c.beginPath();c.moveTo(pl,Y(l[0]));c.lineTo(pl+W,Y(l[0]));c.stroke();c.setLineDash([])}
+  const stride=Math.max(1,Math.floor(fr.length/600));
+  for(const s of ser){c.strokeStyle=s[2];c.lineWidth=1.6;c.beginPath();for(let i=0;i<fr.length;i+=stride){const f=fr[i];const x=X(f.t),y=Y(val(f,s[0]));i?c.lineTo(x,y):c.moveTo(x,y)}c.stroke()}
+  if(sim.eventT!=null){c.strokeStyle="#e2574c";c.lineWidth=1;c.beginPath();c.moveTo(X(sim.eventT),pt);c.lineTo(X(sim.eventT),pt+H);c.stroke()}
+  c.strokeStyle=CC.fg;c.lineWidth=1;c.beginPath();c.moveTo(Math.round(X(cursor))+.5,pt);c.lineTo(Math.round(X(cursor))+.5,pt+H);c.stroke();
+}
+function nice(x){const e=Math.pow(10,Math.floor(Math.log10(x)));const f=x/e;return (f<1.5?1:f<3.5?2:f<7.5?5:10)*e}
+function fmtN(v){return Math.abs(v)>=1000?(v/1000).toFixed(1)+"k":Math.abs(v)<10&&v!==0?v.toFixed(1):v.toFixed(0)}
+function drawCharts(){
+  drawChart($("c1"),SER1,tPlay,[[P.capC,"#e2574c"],[P.capF,"#b58cf0"]]);
+  drawChart($("c2"),SER2,tPlay);drawChart($("c3"),SER3,tPlay);
+}
+
+/* ---- кадр ---- */
+const v3=new THREE.Vector3();
+function frameAt(t){const i=Math.min(sim.frames.length-1,Math.max(0,Math.round(t*60)));return sim.frames[i]}
+function updateScene(f){
+  const G=sim.G;
+  world.position.x=-(f.s%PERIOD);
+  personTilt.rotation.z=-f.th;
+  const S=shoulderAt(P,G,f.th);
+  // точка хвата и положение поручня
+  let Hp=[0,P.h,0],holding=f.st===0||f.st>=3;
+  pole.position.set(0,L_POLE/2,0);pole.quaternion.identity();
+  if(f.st>=3){
+    Hp=[S[0]+sim.uB[0]*sim.l0,S[1]+sim.uB[1]*sim.l0,S[2]+sim.uB[2]*sim.l0];
+    const piv=f.st===3?[0,0,0]:[0,L_POLE,0];
+    v3.set(Hp[0]-piv[0],Hp[1]-piv[1],Hp[2]-piv[2]).normalize();
+    if(f.st===3&&v3.y<0.05){v3.y=0.05;v3.normalize()}
+    if(f.st===4&&v3.y>-0.05){v3.y=-0.05;v3.normalize()}
+    const end=[piv[0]+v3.x*L_POLE,piv[1]+v3.y*L_POLE,piv[2]+v3.z*L_POLE];
+    setCyl(pole,piv,end);pole.scale.set(1,1,1);
+  }
+  if(!holding){Hp=[S[0]+0.06,S[1]-0.6*G.sc,S[2]+(G.oz>0?0.04:-0.04)]}
+  // рука: плечо — локоть — кисть
+  const l1=0.31*G.sc,l2=0.31*G.sc,dx=Hp[0]-S[0],dy=Hp[1]-S[1],dz=Hp[2]-S[2],d=Math.hypot(dx,dy,dz)||1e-6;
+  const u=[dx/d,dy/d,dz/d];let E;
+  if(d>=l1+l2-1e-4){const k=l1/(l1+l2)*d;E=[S[0]+u[0]*k,S[1]+u[1]*k,S[2]+u[2]*k]}
+  else{const x=(l1*l1-l2*l2+d*d)/(2*d),y=Math.sqrt(Math.max(0,l1*l1-x*x));
+    let hint=[G.ox*2,-1,G.oz*2];const dot=hint[0]*u[0]+hint[1]*u[1]+hint[2]*u[2];
+    hint=[hint[0]-dot*u[0],hint[1]-dot*u[1],hint[2]-dot*u[2]];const hl=Math.hypot(...hint)||1;
+    E=[S[0]+u[0]*x+hint[0]/hl*y,S[1]+u[1]*x+hint[1]/hl*y,S[2]+u[2]*x+hint[2]/hl*y]}
+  setCyl(upperArm,S,E);setCyl(foreArm,E,Hp);hand.position.set(...Hp);
+  handMark.visible=f.st!==3&&f.st!==4;
+  // крепления
+  const uc=f.Qc/P.capC,uf=f.Qf/P.capF;
+  flangeMatC.color.setHex(f.st===3?0xe2574c:utilColor(uc));flangeMatF.color.setHex(f.st===4?0xe2574c:utilColor(uf));
+  // стрелки
+  if(f.Fh>3&&f.st===0){forceArrow.visible=true;v3.set(f.Fpx,0,f.Fpz).normalize();forceArrow.position.set(0,P.h,0);forceArrow.setDirection(v3);forceArrow.setLength(Math.min(1.6,0.12+f.Fh/700),0.1,0.06)}else forceArrow.visible=false;
+  const cmx=P.dx+0.55*P.height*Math.sin(f.th),cmy=0.55*P.height*Math.cos(f.th);
+  if(Math.abs(f.vrel)>0.02){velArrow.visible=true;v3.set(Math.sign(f.vrel),0,0);velArrow.position.set(cmx,cmy,P.dz);velArrow.setDirection(v3);velArrow.setLength(0.1+Math.abs(f.vrel)*0.6,0.08,0.05)}else velArrow.visible=false;
+  // HUD
+  $("hTrain").textContent=(f.v*3.6).toFixed(1);
+  $("hTrainS").textContent="замедл. "+f.a.toFixed(2)+" м/с²";
+  $("hPers").textContent=((f.v+f.vrel)*3.6).toFixed(1);
+  $("hPersS").textContent="отн. вагона "+(f.vrel>=0?"+":"−")+Math.abs(f.vrel).toFixed(2)+" м/с";
+  $("hForce").textContent=f.Fh.toFixed(0);
+  $("hForceS").textContent="наклон "+(f.th*180/Math.PI).toFixed(1)+"° · ×"+P.people+" чел.";
+  let [st,cls]=STATUS[f.st];if(f.st===0&&Math.max(uc,uf)>=0.6){cls="warn";st="Держится, крепление нагружено"}
+  if(f.fallen)st+=" · падение";
+  const sEl=$("status");sEl.textContent=st;sEl.className="status "+cls;
+  $("bC").style.width=Math.min(100,uc*100)+"%";$("bC").style.background=cssUtil(uc);
+  $("bF").style.width=Math.min(100,uf*100)+"%";$("bF").style.background=cssUtil(uf);
+  $("uC").textContent=Math.round(sim.pk.uC*100)+" %";$("uF").textContent=Math.round(sim.pk.uF*100)+" %";
+  $("clock").textContent=t2s(tPlay)+" / "+t2s(sim.tEnd);
+  $("scrub").value=String(Math.round(tPlay*100));
+}
+const t2s=t=>t.toFixed(2)+" с";
+function resize(){const r=viewEl.getBoundingClientRect();renderer.setSize(r.width,r.height,false);camera.aspect=r.width/Math.max(1,r.height);camera.updateProjectionMatrix();drawCharts()}
+new ResizeObserver(resize).observe(viewEl);
+
+let last=performance.now(),chartTick=0;
+function loop(now){
+  const dt=Math.min(0.05,(now-last)/1000);last=now;
+  if(playing){tPlay+=dt*rate;if(tPlay>=sim.tEnd){tPlay=sim.tEnd;playing=false;$("play").textContent="Пуск"}}
+  updateScene(frameAt(tPlay));
+  if(++chartTick%3===0)drawCharts();
+  controls.update();renderer.render(scene,camera);
+  requestAnimationFrame(loop);
+}
+syncInputs();recompute();setCam("inside");resize();
+document.querySelector('[data-preset="emergency"]').classList.add("on");
+requestAnimationFrame(loop);
+</script>
